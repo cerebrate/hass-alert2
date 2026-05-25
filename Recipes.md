@@ -21,6 +21,19 @@ alert2:
 
 Replace "foo" with whatever notifier you want to use. The default is `persistent_notification`, which adds notifications to the "Notifications" tab in HomeAssistant.
 
+If you're using Telegram as your notifier, then you may be interested in the following additional defaults. The [README](README.md) has further documentation on [`parse_mode`](README.md#telegram-notifiers) and [`notify_reason`](README.md#common-alert-features-1).
+```yaml
+alert2:
+  defaults:
+    ...
+    data:
+      # Telgram parse_mode defaults to "markdown", which throws errors when sending messages with certain characters, like \"
+      parse_mode: "plain_text"
+      # Direct telegram to not trigger a mobile phone notification when Alert2 sends messages that an alert stopped firing.
+      # notify_reason is documented here: http://localhost:6420/#common-alert-features-1
+      disable_notification: "{{ notify_reason in ['StopFiring'] }}"
+```
+
 ## A few simple alerts
 
 A basic condition alert requires just `domain`, `name`, and `condition` to be set.  Everything else is optional. `domain` and `name` can be whatever you want. The purpose is to help you organize your alerts.
