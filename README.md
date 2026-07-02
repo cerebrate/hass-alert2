@@ -323,6 +323,9 @@ The `defaults:` subsection specifies optional default values for parameters comm
 | `throttle_fires_per_mins` | [int, float] | Limit notifications of alert firings based on a list of two numbers [X, Y]. If the alert has fired and notified more than X times in the last Y minutes, then throttling turns on and no further fire notifications occur until the rate drops below the threshold. For example, "[10, 60]" means you'll receive no more than 10 notifications of the alert firing every hour. Does not affect reminder notifications.<br><br>Default is no throttling. You can set `summary_notifier` to be notified when throttling ends (by default you won't be). |
 | `priority` | string | Can be "low", "medium", or "high". Affects display of alert in the Alert2 UI Overview card.  Active alerts are sorted by priority and medium and high-priority alerts have a badge colored orange and red, respectively. May be template when used with generators. Default is "low" |
 | `supersede_debounce_secs` | float | Suppress notifications of an alert if any superseding alert has fired within this many seconds of now. The purpose of this setting is to reduce extraneous notifications due to races between two alerts both turning on or off at almost the same time. Defaults to 0.5 seconds.  Can be any value >= 0. |
+| `voice_proxies_enabled` | bool | If true, Alert2 creates Alexa-friendly voice proxy entities for every alert: `binary_sensor.*_active`, `switch.*_acked`, and `switch.*_snoozed`. Defaults to `false`. |
+| `voice_snooze_minutes` | float | Default snooze duration used by voice snooze proxy switches (`switch.*_snoozed`). Minimum 0.01. Defaults to 60. |
+| `voice_event_latch_secs` | float | For event alerts, controls how long `binary_sensor.*_active` stays on after the most recent fire. Minimum 0. Defaults to 60. |
 | `icon` | string | Icon to display next to alert name in UI. Must be of form `prefix:name`. Defaults to `mdi:alert`. |
 | `data` | dict or string | Dictionary passed as the "data" parameter to the notify action. May be either a dict or a template string that evaluates to a dict. Dict fields may be template strings. `data` may be overriden on a key-by-key basis for top-level keys. See doc in [Common alert features](#common-alert-features-1)  |
 | `persistent_notifier_grouping` | string | Can be "separate", "collapse" or "collapse_and_dismiss". When the `persistent_notification` notifier is used, controls how multiple notification messages for the same alert are handled.  "separate" will keep each notification distinct. "collapse" will result in a single persistent notification (keeping only the most recent notification). "collapse_and_dismiss" is similar to "collapse" except the notification is also dismissed if the alert is a condition alert and it turns off.<br>Defaults to "separate". |
@@ -1068,6 +1071,22 @@ A few other actions are available, some of which are used internally by [Alert2 
 <br>`alert2.get_display_msg` renders the `display_msg` field for an alert and returns it.
 
 More details on these calls are in the [`services.yaml`](https://github.com/redstone99/hass-alert2/blob/master/custom_components/alert2/services.yaml) file in this repo, or in the UI by going to "Developer tools" -> "Actions".
+
+### Voice assistant proxy entities
+
+When `defaults.voice_proxies_enabled` is true, Alert2 creates additional entities in Alexa-supported domains so alerts can be exposed and controlled via Home Assistant Cloud voice assistants.
+
+- `binary_sensor.<alert>_active`
+  - Condition alerts: on while alert is firing.
+  - Event alerts: on for `voice_event_latch_secs` after each fire.
+- `switch.<alert>_acked`
+  - Turn on: ack alert.
+  - Turn off: unack alert.
+- `switch.<alert>_snoozed`
+  - Turn on: snooze for `voice_snooze_minutes`.
+  - Turn off: clear snooze immediately.
+
+Expose these proxy entities (not the `alert2.*` entity) in Home Assistant Cloud for Alexa control.
 
 
 ### Events

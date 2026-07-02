@@ -44,7 +44,9 @@ from .config import (
     TOP_LEVEL_SCHEMA_INTERNAL,
 )
 from .entities import (
-    EventAlert, ConditionAlert, AlertGenerator, NotificationReason, mergeDataDict, getPreferredEntityId,
+    AlertBase, EventAlert, ConditionAlert, AlertGenerator,
+    AlertVoiceActiveBinarySensor, AlertVoiceAckSwitch, AlertVoiceSnoozeSwitch,
+    NotificationReason, mergeDataDict, getPreferredEntityId,
     notifierExists
 )
 from .ui import ( UiMgr )
@@ -476,6 +478,10 @@ class Alert2Data:
         self.generators = {}
         self.component = EntityComponent[EventAlert](_LOGGER, DOMAIN, hass)
         self.sensorComponent = EntityComponent[AlertGenerator](_LOGGER, 'sensor', hass)
+        self.voiceBinarySensorComponent = EntityComponent[AlertVoiceActiveBinarySensor](_LOGGER, 'binary_sensor', hass)
+        self.voiceSwitchComponent = EntityComponent[AlertVoiceAckSwitch](_LOGGER, 'switch', hass)
+        self.voiceProxyMap = {}
+        self.voiceProxyEntityIdMap = {}
         self.binarySensorDict = None
         self.haStarted = False
         self.delayedNotifierMgr = None
@@ -526,6 +532,9 @@ class Alert2Data:
                 'icon': 'mdi:alert',
                 'persistent_notifier_grouping': 'separate',
                 'reminder_message': None,
+                'voice_proxies_enabled': False,
+                'voice_snooze_minutes': 60.0,
+                'voice_event_latch_secs': 60.0,
             },
             # Optional defaults for internal alerts
             'tracked': [
@@ -876,6 +885,7 @@ class Alert2Data:
                 await self.sensorComponent.async_add_entities([newEnt])
             else:
                 await self.component.async_add_entities([newEnt])
+                await self.createVoiceProxies(newEnt)
             msg = f'Lifecycle created {"tracked " if isTracked else ""} alert {newEnt.entity_id}' \
                 + (' via UI' if fromUI else '')
             if genVars is None:
@@ -907,6 +917,7 @@ class Alert2Data:
                 del self.alerts[domain]
             _LOGGER.debug(f'Lifecycle undeclareAlert {ent.entity_id}')
             await self.component.async_remove_entity(ent.entity_id)
+            await self.removeVoiceProxies(domain, name, removeFromRegistry=removeFromRegistry)
         elif domain in self.tracked and name in self.tracked[domain]:
             ent = self.tracked[domain][name]
             del self.tracked[domain][name]
@@ -914,6 +925,7 @@ class Alert2Data:
                 del self.tracked[domain]
             _LOGGER.debug(f'Lifecycle undeclareAlert {ent.entity_id}')
             await self.component.async_remove_entity(ent.entity_id)
+            await self.removeVoiceProxies(domain, name, removeFromRegistry=removeFromRegistry)
         elif domain == GENERATOR_DOMAIN and name in self.generators:
             ent = self.generators[name]
             if removeFromRegistry:
@@ -949,6 +961,43 @@ class Alert2Data:
             return errMsg
         
         return None
+
+    def _voiceProxiesEnabled(self) -> bool:
+        return self.topConfig and 'defaults' in self.topConfig and self.topConfig['defaults'].get('voice_proxies_enabled', False)
+
+    async def createVoiceProxies(self, sourceAlert):
+        if not isinstance(sourceAlert, AlertBase):
+            return
+        if not self._voiceProxiesEnabled():
+            return
+        key = (sourceAlert.alDomain, sourceAlert.alName)
+        if key in self.voiceProxyMap:
+            await self.removeVoiceProxies(sourceAlert.alDomain, sourceAlert.alName)
+        active_proxy = AlertVoiceActiveBinarySensor(sourceAlert)
+        ack_proxy = AlertVoiceAckSwitch(sourceAlert)
+        snooze_proxy = AlertVoiceSnoozeSwitch(sourceAlert)
+        self.voiceProxyMap[key] = [active_proxy, ack_proxy, snooze_proxy]
+        self.voiceProxyEntityIdMap[active_proxy.entity_id] = active_proxy
+        self.voiceProxyEntityIdMap[ack_proxy.entity_id] = ack_proxy
+        self.voiceProxyEntityIdMap[snooze_proxy.entity_id] = snooze_proxy
+        await self.voiceBinarySensorComponent.async_add_entities([active_proxy])
+        await self.voiceSwitchComponent.async_add_entities([ack_proxy, snooze_proxy])
+
+    async def removeVoiceProxies(self, domain, name, removeFromRegistry=False):
+        key = (domain, name)
+        if key not in self.voiceProxyMap:
+            return
+        for ent in self.voiceProxyMap[key]:
+            if isinstance(ent, AlertVoiceActiveBinarySensor):
+                await self.voiceBinarySensorComponent.async_remove_entity(ent.entity_id)
+            else:
+                await self.voiceSwitchComponent.async_remove_entity(ent.entity_id)
+            self.voiceProxyEntityIdMap.pop(ent.entity_id, None)
+            if removeFromRegistry:
+                entRegistry = entity_registry.async_get(self._hass)
+                if entRegistry.async_is_registered(ent.entity_id):
+                    entRegistry.async_remove(ent.entity_id)
+        del self.voiceProxyMap[key]
 
     def delayGcRegistry(self):
         if self.haStarted:
@@ -1007,6 +1056,14 @@ class Alert2Data:
                entRegistry.async_is_registered(anId):
                 _LOGGER.info(f'gcEntityRegistry: Removing unused registry entry for {anId}')
                 entRegistry.async_remove(anId)
+
+        # Then purge old voice proxies
+        knownIds = set(self.voiceProxyEntityIdMap.keys())
+        for anId, entry in list(entRegistry.entities.items()):
+            if entry.unique_id and entry.unique_id.startswith('voice-d='):
+                if anId not in knownIds:
+                    _LOGGER.info(f'gcEntityRegistry: Removing unused registry entry for voice proxy {anId}')
+                    entRegistry.async_remove(anId)
         
     def domainNameToId(self, domain, name):
         if domain in self.alerts and name in self.alerts[domain]:
@@ -1239,4 +1296,3 @@ class Alert2Data:
                 return
             data = evdata['data']
         await alertObj.record_event(message, extra_data=data)
-

@@ -19,10 +19,16 @@ from   homeassistant.core import HomeAssistant, Context, callback, Event, EventS
 from   homeassistant.exceptions import TemplateError, ServiceNotFound, HomeAssistantError
 from   homeassistant.helpers import template as template_helper
 import homeassistant.helpers.entity_registry as er
-from   homeassistant.helpers.event import TrackTemplate, TrackTemplateResult, async_track_template_result
+from   homeassistant.helpers.event import (
+    TrackTemplate,
+    TrackTemplateResult,
+    async_track_state_change_event,
+    async_track_template_result,
+)
 from   homeassistant.helpers.trigger import async_initialize_triggers
-from   homeassistant.components.binary_sensor import BinarySensorDeviceClass
+from   homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from   homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from   homeassistant.components.switch import SwitchEntity
 import homeassistant.util.dt as dt
 from   homeassistant.util import slugify
 
@@ -280,6 +286,8 @@ def entNameFromDN(domain, name):
     return f'{domain}_{name}'
 def getPreferredEntityId(domain, name):
     return f'alert2.{slugify(entNameFromDN(domain, name))}'
+def getVoiceProxyEntityId(entityDomain, domain, name, suffix):
+    return f'{entityDomain}.{slugify(entNameFromDN(domain, name) + "_" + suffix)}'
     
 def renderResultToList(arez):
     if len(arez) == 0:
@@ -1019,6 +1027,8 @@ class AlertBase(AlertCommon, RestoreEntity):
         self._display_msg_template = config['display_msg'] if 'display_msg' in config else None
         self._icon = getField('icon', config, defaultCfg)
         self._ack_required = config['ack_required'] if 'ack_required' in config else False
+        self._voice_snooze_minutes = getField('voice_snooze_minutes', config, defaultCfg)
+        self._voice_event_latch_secs = getField('voice_event_latch_secs', config, defaultCfg)
         self._ack_reminder_message_template = config['ack_reminder_message'] if 'ack_reminder_message' in config else None
         # Reminders can either be ack reminders (if ack_required is set), or for condition alerts can be alert-on reminders
         self.reminder_frequency_mins = getField('reminder_frequency_mins', config, defaultCfg)
@@ -1063,6 +1073,14 @@ class AlertBase(AlertCommon, RestoreEntity):
 
         self.future_notification_info = None
         self.friendlyNameTracker = None
+
+    @property
+    def voice_snooze_minutes(self) -> float:
+        return self._voice_snooze_minutes
+
+    @property
+    def voice_event_latch_secs(self) -> float:
+        return self._voice_event_latch_secs
 
     # Called once async_added_to_hass() so entity_id exists and self.extraVariables is populated
     async def lateInit(self):
@@ -2391,3 +2409,141 @@ class ConditionAlert(AlertBase):
                 report(DOMAIN, 'error', f'{gAssertMsg} template for {self.name}: condition_bool is neither None or bool. Is {condition_bool} {type(condition_bool)}')
                 newState = False
         return self.update_state_internal(newState)
+
+
+class AlertVoiceProxyBase(Entity):
+    _attr_should_poll = False
+
+    def __init__(self, source_alert: "AlertBase", entity_domain: str, suffix: str, display_suffix: str):
+        super().__init__()
+        self._source_alert = source_alert
+        self.hass = source_alert.hass
+        self.alertData = source_alert.alertData
+        self.alDomain = source_alert.alDomain
+        self.alName = source_alert.alName
+        self._suffix = suffix
+        self._attr_unique_id = f'voice-d={self.alDomain}-n={self.alName}-s={suffix}'
+        self.entity_id = getVoiceProxyEntityId(entity_domain, self.alDomain, self.alName, suffix)
+        self._attr_name = f'{entNameFromDN(self.alDomain, self.alName)} {display_suffix}'
+        self._detach_source_state = None
+        self._future_state_task = None
+
+    def _seconds_to_next_update(self) -> float | None:
+        return None
+
+    def _schedule_next_update(self):
+        if self._future_state_task is not None:
+            cancel_task(DOMAIN, self._future_state_task)
+            self._future_state_task = None
+        next_secs = self._seconds_to_next_update()
+        if next_secs is None:
+            return
+        next_secs = max(0.0, next_secs)
+
+        async def wait_then_update():
+            await asyncio.sleep(next_secs)
+            self._future_state_task = None
+            self.async_write_ha_state()
+            self._schedule_next_update()
+
+        self._future_state_task = create_background_task(self.hass, DOMAIN, wait_then_update())
+
+    @callback
+    def _source_state_changed(self, event: Event[EventStateChangedData]):
+        self._schedule_next_update()
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._detach_source_state = async_track_state_change_event(
+            self.hass, [self._source_alert.entity_id], self._source_state_changed
+        )
+        self._schedule_next_update()
+
+    async def async_will_remove_from_hass(self) -> None:
+        await super().async_will_remove_from_hass()
+        if self._detach_source_state is not None:
+            self._detach_source_state()
+            self._detach_source_state = None
+        if self._future_state_task is not None:
+            cancel_task(DOMAIN, self._future_state_task)
+            self._future_state_task = None
+
+
+class AlertVoiceActiveBinarySensor(AlertVoiceProxyBase, BinarySensorEntity):
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(self, source_alert: "AlertBase"):
+        AlertVoiceProxyBase.__init__(self, source_alert, 'binary_sensor', 'active', 'active')
+        BinarySensorEntity.__init__(self)
+
+    @property
+    def is_on(self) -> bool:
+        if isinstance(self._source_alert, ConditionAlert):
+            return self._source_alert.state == 'on'
+        assert isinstance(self._source_alert, EventAlert), f'{gAssertMsg} Unexpected alert type {type(self._source_alert)}'
+        if self._source_alert.last_fired_time is None:
+            return False
+        remaining_secs = (self._source_alert.last_fired_time - dt.now()).total_seconds() + self._source_alert.voice_event_latch_secs
+        return remaining_secs > 0
+
+    def _seconds_to_next_update(self) -> float | None:
+        if not isinstance(self._source_alert, EventAlert):
+            return None
+        if self._source_alert.last_fired_time is None:
+            return None
+        remaining_secs = (self._source_alert.last_fired_time - dt.now()).total_seconds() + self._source_alert.voice_event_latch_secs
+        if remaining_secs <= 0:
+            return None
+        return remaining_secs
+
+
+class AlertVoiceAckSwitch(AlertVoiceProxyBase, SwitchEntity):
+    _attr_icon = 'mdi:check-circle-outline'
+
+    def __init__(self, source_alert: "AlertBase"):
+        AlertVoiceProxyBase.__init__(self, source_alert, 'switch', 'acked', 'acked')
+        SwitchEntity.__init__(self)
+
+    @property
+    def is_on(self) -> bool:
+        return self._source_alert.is_acked()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._source_alert.async_ack()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._source_alert.async_unack()
+        self.async_write_ha_state()
+
+
+class AlertVoiceSnoozeSwitch(AlertVoiceProxyBase, SwitchEntity):
+    _attr_icon = 'mdi:bell-sleep-outline'
+
+    def __init__(self, source_alert: "AlertBase"):
+        AlertVoiceProxyBase.__init__(self, source_alert, 'switch', 'snoozed', 'snoozed')
+        SwitchEntity.__init__(self)
+
+    @property
+    def is_on(self) -> bool:
+        return self._seconds_to_next_update() is not None
+
+    def _seconds_to_next_update(self) -> float | None:
+        if not isinstance(self._source_alert.notification_control, rawdt.datetime):
+            return None
+        remaining_secs = (self._source_alert.notification_control - dt.now()).total_seconds()
+        if remaining_secs <= 0:
+            return None
+        return remaining_secs
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        snooze_until = dt.now() + rawdt.timedelta(minutes=self._source_alert.voice_snooze_minutes)
+        await self._source_alert.async_notification_control(enable=True, snooze_until=snooze_until)
+        self._schedule_next_update()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._source_alert.async_notification_control(enable=True, snooze_until=None, ack_at_snooze_start=False)
+        self._schedule_next_update()
+        self.async_write_ha_state()

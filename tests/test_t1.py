@@ -5181,3 +5181,98 @@ async def test_update(hass, service_calls, monkeypatch):
     await asyncio.sleep(1.1)
     assert hass.states.get('sensor.st1').state == "['alert2.alert2_error', 'alert2.alert2_warning', 'alert2.alert2_global_exception', 'alert2.d_t2', 'alert2.d_foo']"
     assert hass.states.get('sensor.st2').state == "[]"
+
+
+async def test_voice_proxies_default_off(hass, service_calls):
+    hass.states.async_set("sensor.a", "off")
+    cfg = {'alert2': {'defaults': {'notifier': None},
+                      'alerts': [{'domain': 'test', 'name': 'voice0', 'condition': 'sensor.a'}]}}
+    assert await async_setup_component(hass, DOMAIN, cfg)
+    await hass.async_start()
+    await hass.async_block_till_done()
+    assert service_calls.isEmpty()
+
+    active_eid = a2Entities.getVoiceProxyEntityId('binary_sensor', 'test', 'voice0', 'active')
+    ack_eid = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice0', 'acked')
+    snooze_eid = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice0', 'snoozed')
+    assert hass.states.get(active_eid) is None
+    assert hass.states.get(ack_eid) is None
+    assert hass.states.get(snooze_eid) is None
+
+
+async def test_voice_proxy_ack_and_snooze_switches(hass, service_calls):
+    hass.states.async_set("sensor.a", "off")
+    cfg = {'alert2': {'defaults': {'notifier': None, 'voice_proxies_enabled': True, 'voice_snooze_minutes': 0.02},
+                      'alerts': [{'domain': 'test', 'name': 'voice1', 'condition': 'sensor.a'}]}}
+    assert await async_setup_component(hass, DOMAIN, cfg)
+    await hass.async_start()
+    await hass.async_block_till_done()
+    assert service_calls.isEmpty()
+
+    gad = hass.data[DOMAIN]
+    t1 = gad.alerts['test']['voice1']
+    active_eid = a2Entities.getVoiceProxyEntityId('binary_sensor', 'test', 'voice1', 'active')
+    ack_eid = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice1', 'acked')
+    snooze_eid = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice1', 'snoozed')
+    ack_ent = gad.voiceProxyEntityIdMap[ack_eid]
+    snooze_ent = gad.voiceProxyEntityIdMap[snooze_eid]
+
+    assert hass.states.get(active_eid).state == 'off'
+    assert hass.states.get(ack_eid).state == 'off'
+    assert hass.states.get(snooze_eid).state == 'off'
+
+    hass.states.async_set("sensor.a", "on")
+    await hass.async_block_till_done()
+    assert hass.states.get(active_eid).state == 'on'
+
+    await ack_ent.async_turn_on()
+    await hass.async_block_till_done()
+    assert t1.is_acked()
+    assert hass.states.get(ack_eid).state == 'on'
+
+    await ack_ent.async_turn_off()
+    await hass.async_block_till_done()
+    assert not t1.is_acked()
+    assert hass.states.get(ack_eid).state == 'off'
+
+    await snooze_ent.async_turn_on()
+    await hass.async_block_till_done()
+    assert isinstance(t1.notification_control, rawdt.datetime)
+    assert hass.states.get(snooze_eid).state == 'on'
+
+    await snooze_ent.async_turn_off()
+    await hass.async_block_till_done()
+    assert t1.notification_control == a2Entities.NOTIFICATIONS_ENABLED
+    assert hass.states.get(snooze_eid).state == 'off'
+
+
+async def test_voice_proxy_event_latch_and_reload_toggle(hass, service_calls, monkeypatch):
+    cfg = {'alert2': {'defaults': {'notifier': None, 'voice_proxies_enabled': True, 'voice_event_latch_secs': 0.2},
+                      'tracked': [{'domain': 'test', 'name': 'voice2'}]}}
+    assert await async_setup_component(hass, DOMAIN, cfg)
+    await hass.async_start()
+    await hass.async_block_till_done()
+    assert service_calls.isEmpty()
+
+    active_eid = a2Entities.getVoiceProxyEntityId('binary_sensor', 'test', 'voice2', 'active')
+    ack_eid = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice2', 'acked')
+    snooze_eid = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice2', 'snoozed')
+    assert hass.states.get(active_eid).state == 'off'
+    assert hass.states.get(ack_eid).state == 'off'
+    assert hass.states.get(snooze_eid).state == 'off'
+
+    await hass.services.async_call('alert2', 'report',
+                                   {'domain': 'test', 'name': 'voice2', 'message': 'fire'})
+    await hass.async_block_till_done()
+    assert hass.states.get(active_eid).state == 'on'
+
+    await asyncio.sleep(0.35)
+    await hass.async_block_till_done()
+    assert hass.states.get(active_eid).state == 'off'
+
+    cfg2 = {'alert2': {'defaults': {'notifier': None, 'voice_proxies_enabled': False},
+                       'tracked': [{'domain': 'test', 'name': 'voice2'}]}}
+    await do_reload(cfg2, hass, monkeypatch)
+    assert hass.states.get(active_eid) is None
+    assert hass.states.get(ack_eid) is None
+    assert hass.states.get(snooze_eid) is None
