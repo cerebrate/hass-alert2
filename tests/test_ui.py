@@ -322,6 +322,37 @@ async def test_defaults(hass, service_calls, hass_client, hass_storage):
     rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'supersede_debounce_secs': '-4'} }})
     assert re.search('be at least 0', rez['error'])
 
+    # voice_proxies_enabled
+    rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'voice_proxies_enabled': True} }})
+    assert re.search('non-string value', rez['error'])
+    rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'voice_proxies_enabled': 'true'} }})
+    assert rez['rawUi']['defaults']['voice_proxies_enabled'] == 'true'
+    assert hass_storage['alert2.storage']['data']['defaults']['voice_proxies_enabled'] == 'true'
+    assert gad.topConfig['defaults']['voice_proxies_enabled'] == True
+    rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'voice_proxies_enabled': 'no'} }})
+    assert rez['rawUi']['defaults']['voice_proxies_enabled'] == 'no'
+    assert gad.topConfig['defaults']['voice_proxies_enabled'] == False
+
+    # voice_snooze_minutes
+    rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'voice_snooze_minutes': 2} }})
+    assert re.search('non-string value', rez['error'])
+    rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'voice_snooze_minutes': '2.5'} }})
+    assert rez['rawUi']['defaults']['voice_snooze_minutes'] == '2.5'
+    assert hass_storage['alert2.storage']['data']['defaults']['voice_snooze_minutes'] == '2.5'
+    assert gad.topConfig['defaults']['voice_snooze_minutes'] == 2.5
+    rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'voice_snooze_minutes': '0'} }})
+    assert re.search('be at least 0.01', rez['error'])
+
+    # voice_event_latch_secs
+    rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'voice_event_latch_secs': 3} }})
+    assert re.search('non-string value', rez['error'])
+    rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'voice_event_latch_secs': '4'} }})
+    assert rez['rawUi']['defaults']['voice_event_latch_secs'] == '4'
+    assert hass_storage['alert2.storage']['data']['defaults']['voice_event_latch_secs'] == '4'
+    assert gad.topConfig['defaults']['voice_event_latch_secs'] == 4
+    rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'voice_event_latch_secs': '-1'} }})
+    assert re.search('be at least 0', rez['error'])
+
     # throttle_fires_per_mins
     rez = await tpost("/api/alert2/saveTopConfig", {'topConfig': { 'defaults': {'throttle_fires_per_mins': ''} }})
     #   pick up the default val
@@ -463,6 +494,9 @@ async def test_defaults2(hass, service_calls, hass_client, hass_storage):
     assert t1._data[1] == {'a': 3}
     assert t1._persistent_notifier_grouping == PersistantNotificationHelper.Collapse
     assert t1._reminder_message_template.template == cfga['defaults']['reminder_message']
+    assert t1.voice_proxies_enabled == False
+    assert t1.voice_snooze_minutes == 60
+    assert t1.voice_event_latch_secs == 60
     
     # Check how defaults are sent to UI
     rez = await tpost("/api/alert2/loadTopConfig", {})
@@ -472,6 +506,7 @@ async def test_defaults2(hass, service_calls, hass_client, hass_storage):
                                             'summary_notifier': False, 'done_notifier': True, 'annotate_messages': True,
                                             'throttle_fires_per_mins': [1, 2], 'priority': 'low', 'icon':'mdi:alert',
                                             'persistent_notifier_grouping': PersistantNotificationHelper.Collapse,
+                                            'voice_proxies_enabled': False, 'voice_snooze_minutes': 60, 'voice_event_latch_secs': 60,
                                             'reminder_message': 'rhappy',
                                             'data': '{{ {"a": 4} }}',
                                             },
@@ -483,6 +518,7 @@ async def test_defaults2(hass, service_calls, hass_client, hass_storage):
                                         'summary_notifier': False, 'done_notifier': True, 'annotate_messages': True,
                                         'throttle_fires_per_mins': [5, 6], 'priority': 'low', 'icon':'mdi:alert',
                                         'persistent_notifier_grouping': PersistantNotificationHelper.Collapse,
+                                        'voice_proxies_enabled': False, 'voice_snooze_minutes': 60, 'voice_event_latch_secs': 60,
                                         'reminder_message': 'rhappy',
                                         'data': ['{{ {"a": 4} }}', {'a': 3}] },
                            'tracked': [{'domain': 'alert2', 'name': 'global_exception', 'throttle_fires_per_mins': [20, 60]}],
@@ -768,6 +804,24 @@ async def test_render_v(hass, service_calls, hass_client, hass_storage):
     assert rez == { 'rez': True }
     rez = await tpost("/api/alert2/renderValue", {'name': 'ack_reminders_only', 'txt': '{{ true }}' })
     assert re.search('invalid boolean value', rez['error'])
+
+    # voice_proxies_enabled
+    rez = await tpost("/api/alert2/renderValue", {'name': 'voice_proxies_enabled', 'txt': 'on' })
+    assert rez == { 'rez': True }
+    rez = await tpost("/api/alert2/renderValue", {'name': 'voice_proxies_enabled', 'txt': '{{ true }}' })
+    assert re.search('invalid boolean value', rez['error'])
+
+    # voice_snooze_minutes
+    rez = await tpost("/api/alert2/renderValue", {'name': 'voice_snooze_minutes', 'txt': '3.5' })
+    assert rez == { 'rez': 3.5 }
+    rez = await tpost("/api/alert2/renderValue", {'name': 'voice_snooze_minutes', 'txt': '0' })
+    assert re.search('must be at least 0.01', rez['error'])
+
+    # voice_event_latch_secs
+    rez = await tpost("/api/alert2/renderValue", {'name': 'voice_event_latch_secs', 'txt': '0' })
+    assert rez == { 'rez': 0 }
+    rez = await tpost("/api/alert2/renderValue", {'name': 'voice_event_latch_secs', 'txt': '-1' })
+    assert re.search('must be at least 0', rez['error'])
 
     # reminder_frequency_mins
     rez = await tpost("/api/alert2/renderValue", {'name': 'reminder_frequency_mins', 'txt': '3' })

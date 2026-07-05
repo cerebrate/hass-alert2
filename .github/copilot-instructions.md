@@ -31,6 +31,28 @@ tests/
   dummy_server.py   - Mock notify entity used in tests
 ```
 
+## Configuration Scope and Layering Rules
+
+When adding or modifying config fields, keep scope boundaries explicit and preserve Alert2 layering semantics:
+
+1. **Top-level options** (e.g. `skip_internal_errors`, startup options) live at `alert2:`.
+2. **Defaults options** live under `alert2.defaults:` and define baseline behavior for alerts.
+3. **Per-alert options** live in each alert/tracked entry and override effective defaults for that alert.
+
+Layering order for defaults/per-alert behavior is:
+
+1. Built-in defaults
+2. YAML `defaults`
+3. UI defaults override YAML defaults
+4. Per-alert value overrides effective defaults
+
+Implementation checklist for any new field that is editable from UI card flows:
+
+1. Add schema support in `config.py` for both intended scopes.
+2. Wire runtime resolution in entities using effective defaults + per-alert override.
+3. Update UI parser/validator paths in `ui.py` (`prepStrConfigField`, render/save/load handling).
+4. Add tests for YAML defaults, UI defaults, and per-alert override behavior.
+
 ---
 
 ## Key Classes and Their Roles
@@ -223,6 +245,8 @@ pip install -r requirements_test.txt
 # Run tests
 pytest tests/
 ```
+
+- **Cloud-run guardrail**: Never run pytest in a cloud session until the current working branch is pushed and the run is explicitly targeted at that pushed branch.
 
 - `test_t1.py` covers all core alert types, generators, supersede, throttle, snooze, reload.
 - `test_ui.py` covers the REST/WebSocket UI layer.

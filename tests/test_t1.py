@@ -5276,3 +5276,53 @@ async def test_voice_proxy_event_latch_and_reload_toggle(hass, service_calls, mo
     assert hass.states.get(active_eid) is None
     assert hass.states.get(ack_eid) is None
     assert hass.states.get(snooze_eid) is None
+
+
+async def test_voice_proxy_per_alert_overrides(hass, service_calls, monkeypatch):
+    hass.states.async_set("sensor.a", "off")
+    cfg = {'alert2': {'defaults': {'notifier': None, 'voice_proxies_enabled': True},
+                      'alerts': [
+                          {'domain': 'test', 'name': 'voice3a', 'condition': 'sensor.a'},
+                          {'domain': 'test', 'name': 'voice3b', 'condition': 'sensor.a', 'voice_proxies_enabled': False},
+                      ]}}
+    assert await async_setup_component(hass, DOMAIN, cfg)
+    await hass.async_start()
+    await hass.async_block_till_done()
+    assert service_calls.isEmpty()
+
+    v3a_active = a2Entities.getVoiceProxyEntityId('binary_sensor', 'test', 'voice3a', 'active')
+    v3a_ack = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice3a', 'acked')
+    v3a_snooze = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice3a', 'snoozed')
+    assert hass.states.get(v3a_active).state == 'off'
+    assert hass.states.get(v3a_ack).state == 'off'
+    assert hass.states.get(v3a_snooze).state == 'off'
+
+    v3b_active = a2Entities.getVoiceProxyEntityId('binary_sensor', 'test', 'voice3b', 'active')
+    v3b_ack = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice3b', 'acked')
+    v3b_snooze = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voice3b', 'snoozed')
+    assert hass.states.get(v3b_active) is None
+    assert hass.states.get(v3b_ack) is None
+    assert hass.states.get(v3b_snooze) is None
+
+    cfg2 = {'alert2': {'defaults': {'notifier': None, 'voice_proxies_enabled': False},
+                       'alerts': [
+                           {'domain': 'test', 'name': 'voice3a', 'condition': 'sensor.a', 'voice_proxies_enabled': True},
+                           {'domain': 'test', 'name': 'voice3b', 'condition': 'sensor.a'},
+                       ]}}
+    await do_reload(cfg2, hass, monkeypatch)
+    assert hass.states.get(v3a_active).state == 'off'
+    assert hass.states.get(v3a_ack).state == 'off'
+    assert hass.states.get(v3a_snooze).state == 'off'
+    assert hass.states.get(v3b_active) is None
+    assert hass.states.get(v3b_ack) is None
+    assert hass.states.get(v3b_snooze) is None
+
+    cfg3 = {'alert2': {'defaults': {'notifier': None, 'voice_proxies_enabled': False},
+                       'alerts': [
+                           {'domain': 'test', 'name': 'voice3a', 'condition': 'sensor.a'},
+                           {'domain': 'test', 'name': 'voice3b', 'condition': 'sensor.a'},
+                       ]}}
+    await do_reload(cfg3, hass, monkeypatch)
+    assert hass.states.get(v3a_active) is None
+    assert hass.states.get(v3a_ack) is None
+    assert hass.states.get(v3a_snooze) is None

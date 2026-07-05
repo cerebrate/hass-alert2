@@ -1027,6 +1027,7 @@ class AlertBase(AlertCommon, RestoreEntity):
         self._display_msg_template = config['display_msg'] if 'display_msg' in config else None
         self._icon = getField('icon', config, defaultCfg)
         self._ack_required = config['ack_required'] if 'ack_required' in config else False
+        self._voice_proxies_enabled = getField('voice_proxies_enabled', config, defaultCfg)
         self._voice_snooze_minutes = getField('voice_snooze_minutes', config, defaultCfg)
         self._voice_event_latch_secs = getField('voice_event_latch_secs', config, defaultCfg)
         self._ack_reminder_message_template = config['ack_reminder_message'] if 'ack_reminder_message' in config else None
@@ -1081,6 +1082,10 @@ class AlertBase(AlertCommon, RestoreEntity):
     @property
     def voice_event_latch_secs(self) -> float:
         return self._voice_event_latch_secs
+
+    @property
+    def voice_proxies_enabled(self) -> bool:
+        return self._voice_proxies_enabled
 
     # Called once async_added_to_hass() so entity_id exists and self.extraVariables is populated
     async def lateInit(self):

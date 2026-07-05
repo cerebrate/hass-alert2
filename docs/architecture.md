@@ -219,6 +219,8 @@ UI-created settings (stored in .storage/alert2.ui)
 
 The merge happens in `Alert2Data.init2()` / `Alert2Data.noteUiUpdate()`.
 
+Alert-level values then override the effective defaults for each alert instance. This includes voice fields like `voice_proxies_enabled`, `voice_snooze_minutes`, and `voice_event_latch_secs`.
+
 ---
 
 ## UI Integration

@@ -482,6 +482,7 @@ class Alert2Data:
         self.voiceSwitchComponent = EntityComponent[AlertVoiceAckSwitch](_LOGGER, 'switch', hass)
         self.voiceProxyMap = {}
         self.voiceProxyEntityIdMap = {}
+        self._configEntryId = None
         self.binarySensorDict = None
         self.haStarted = False
         self.delayedNotifierMgr = None
@@ -962,13 +963,15 @@ class Alert2Data:
         
         return None
 
-    def _voiceProxiesEnabled(self) -> bool:
-        return self.topConfig and 'defaults' in self.topConfig and self.topConfig['defaults'].get('voice_proxies_enabled', False)
+    def _voiceProxiesEnabledForAlert(self, sourceAlert) -> bool:
+        if not isinstance(sourceAlert, AlertBase):
+            return False
+        return sourceAlert.voice_proxies_enabled
 
     async def createVoiceProxies(self, sourceAlert):
         if not isinstance(sourceAlert, AlertBase):
             return
-        if not self._voiceProxiesEnabled():
+        if not self._voiceProxiesEnabledForAlert(sourceAlert):
             return
         key = (sourceAlert.alDomain, sourceAlert.alName)
         if key in self.voiceProxyMap:
@@ -982,6 +985,13 @@ class Alert2Data:
         self.voiceProxyEntityIdMap[snooze_proxy.entity_id] = snooze_proxy
         await self.voiceBinarySensorComponent.async_add_entities([active_proxy])
         await self.voiceSwitchComponent.async_add_entities([ack_proxy, snooze_proxy])
+        create_background_task(
+            self._hass,
+            DOMAIN,
+            self._assignVoiceProxyConfigEntryIds(
+                [active_proxy.entity_id, ack_proxy.entity_id, snooze_proxy.entity_id]
+            ),
+        )
 
     async def removeVoiceProxies(self, domain, name, removeFromRegistry=False):
         key = (domain, name)
@@ -998,6 +1008,31 @@ class Alert2Data:
                 if entRegistry.async_is_registered(ent.entity_id):
                     entRegistry.async_remove(ent.entity_id)
         del self.voiceProxyMap[key]
+
+    def _getConfigEntryId(self):
+        if self._configEntryId is not None:
+            return self._configEntryId
+        entries = self._hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            return None
+        self._configEntryId = entries[0].entry_id
+        return self._configEntryId
+
+    async def _assignVoiceProxyConfigEntryIds(self, entity_ids):
+        config_entry_id = self._getConfigEntryId()
+        if config_entry_id is None:
+            return
+        entRegistry = entity_registry.async_get(self._hass)
+        for entity_id in entity_ids:
+            wait_count = 5
+            while not entRegistry.async_is_registered(entity_id) and wait_count > 0:
+                await asyncio.sleep(0.1)
+                wait_count -= 1
+            if not entRegistry.async_is_registered(entity_id):
+                continue
+            entry = entRegistry.entities[entity_id]
+            if entry.config_entry_id != config_entry_id:
+                entRegistry.async_update_entity(entity_id, config_entry_id=config_entry_id)
 
     def delayGcRegistry(self):
         if self.haStarted:

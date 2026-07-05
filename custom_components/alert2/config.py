@@ -310,6 +310,7 @@ SINGLE_TRACKED_SCHEMA_PRE_NAME = vol.Schema({
     vol.Optional('priority'): vol.Any('low', 'medium', 'high'),
     vol.Optional('icon'): cv.icon,
     vol.Optional('ack_required'): cv.boolean,
+    vol.Optional('voice_proxies_enabled'): cv.boolean,
     vol.Optional('ack_reminder_message'): cv.template,
     vol.Optional('reminder_frequency_mins'): vol.All(cv.ensure_list, [vol.Coerce(float)], [vol.Range(min=0.01)]),
     vol.Optional('voice_snooze_minutes'): vol.All(vol.Coerce(float), vol.Range(min=0.01)),
