@@ -2423,9 +2423,25 @@ class AlertVoiceProxyBase(Entity):
         self.alName = source_alert.alName
         self._attr_unique_id = source_alert.unique_id or f'd={self.alDomain}-n={self.alName}'
         self.entity_id = getVoiceProxyEntityId(entity_domain, self.alDomain, self.alName)
-        self._attr_name = source_alert.name
+        self._attr_name = self._current_source_friendly_name()
         self._detach_source_state = None
         self._future_state_task = None
+
+    def _current_source_friendly_name(self) -> str:
+        source_state = self.hass.states.get(self._source_alert.entity_id)
+        if source_state:
+            source_name = source_state.attributes.get('friendly_name')
+            if isinstance(source_name, str) and source_name.strip():
+                return source_name
+        source_name = self._source_alert.name
+        if isinstance(source_name, str) and source_name.strip():
+            return source_name
+        return entNameFromDN(self.alDomain, self.alName)
+
+    def _sync_name_from_source(self) -> None:
+        new_name = self._current_source_friendly_name()
+        if new_name != self._attr_name:
+            self._attr_name = new_name
 
     def _event_latch_remaining_secs(self) -> float:
         assert isinstance(self._source_alert, EventAlert), f'{gAssertMsg} Unexpected alert type {type(self._source_alert)}'
@@ -2460,6 +2476,7 @@ class AlertVoiceProxyBase(Entity):
 
     @callback
     def _source_state_changed(self, event: Event[EventStateChangedData]):
+        self._sync_name_from_source()
         self._schedule_next_update()
         self.async_write_ha_state()
 
@@ -2468,6 +2485,7 @@ class AlertVoiceProxyBase(Entity):
         self._detach_source_state = async_track_state_change_event(
             self.hass, [self._source_alert.entity_id], self._source_state_changed
         )
+        self._sync_name_from_source()
         self._schedule_next_update()
 
     async def async_will_remove_from_hass(self) -> None:

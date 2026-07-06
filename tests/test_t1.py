@@ -5323,3 +5323,25 @@ async def test_voice_proxy_per_alert_overrides(hass, service_calls, monkeypatch)
                        ]}}
     await do_reload(cfg3, hass, monkeypatch)
     assert hass.states.get(v3a_switch) is None
+
+
+async def test_voice_proxy_generator_friendly_name_matches_alert(hass, service_calls):
+    hass.states.async_set("sensor.a", "off")
+    cfg = {'alert2': {'defaults': {'notifier': None, 'voice_proxies_enabled': True},
+                      'alerts': [
+                          {'domain': 'test',
+                           'name': '{{ genElem }}',
+                           'generator_name': 'voicegen',
+                           'generator': '["voicegen_a"]',
+                           'condition': 'sensor.a',
+                           'friendly_name': 'Friendly {{ genElem }}'},
+                      ]}}
+    assert await async_setup_component(hass, DOMAIN, cfg)
+    await hass.async_start()
+    await hass.async_block_till_done()
+    assert service_calls.isEmpty()
+
+    alert_eid = 'alert2.test_voicegen_a'
+    switch_eid = a2Entities.getVoiceProxyEntityId('switch', 'test', 'voicegen_a')
+    assert hass.states.get(alert_eid).attributes['friendly_name'] == 'Friendly voicegen_a'
+    assert hass.states.get(switch_eid).attributes['friendly_name'] == 'Friendly voicegen_a'
