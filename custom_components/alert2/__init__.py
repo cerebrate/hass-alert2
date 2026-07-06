@@ -916,7 +916,9 @@ class Alert2Data:
                 del self.alerts[domain]
             _LOGGER.debug(f'Lifecycle undeclareAlert {ent.entity_id}')
             await self.component.async_remove_entity(ent.entity_id)
-            await self.removeVoiceProxies(domain, name, removeFromRegistry=removeFromRegistry)
+            # Voice proxies are derived helper entities. Purge their registry entry
+            # on teardown so disabling/removing proxies does not leave restored ghosts.
+            await self.removeVoiceProxies(domain, name, removeFromRegistry=True)
         elif domain in self.tracked and name in self.tracked[domain]:
             ent = self.tracked[domain][name]
             del self.tracked[domain][name]
@@ -924,7 +926,9 @@ class Alert2Data:
                 del self.tracked[domain]
             _LOGGER.debug(f'Lifecycle undeclareAlert {ent.entity_id}')
             await self.component.async_remove_entity(ent.entity_id)
-            await self.removeVoiceProxies(domain, name, removeFromRegistry=removeFromRegistry)
+            # Voice proxies are derived helper entities. Purge their registry entry
+            # on teardown so disabling/removing proxies does not leave restored ghosts.
+            await self.removeVoiceProxies(domain, name, removeFromRegistry=True)
         elif domain == GENERATOR_DOMAIN and name in self.generators:
             ent = self.generators[name]
             if removeFromRegistry:
