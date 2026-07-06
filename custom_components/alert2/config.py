@@ -282,7 +282,6 @@ DEFAULTS_SCHEMA = vol.Schema({
                                                           msg=f'must be one of "{PersistantNotificationHelper.Separate}", "{PersistantNotificationHelper.Collapse}" or "{PersistantNotificationHelper.CollapseAndDismiss}"'),
     vol.Optional('reminder_message'): vol.Any(None, cv.template),
     vol.Optional('voice_proxies_enabled'): cv.boolean,
-    vol.Optional('voice_snooze_minutes'): vol.All(vol.Coerce(float), vol.Range(min=0.01)),
     vol.Optional('voice_event_latch_secs'): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
 })
 DEFAULTS_SCHEMA_INTERNAL = DEFAULTS_SCHEMA.extend({
@@ -313,7 +312,6 @@ SINGLE_TRACKED_SCHEMA_PRE_NAME = vol.Schema({
     vol.Optional('voice_proxies_enabled'): cv.boolean,
     vol.Optional('ack_reminder_message'): cv.template,
     vol.Optional('reminder_frequency_mins'): vol.All(cv.ensure_list, [vol.Coerce(float)], [vol.Range(min=0.01)]),
-    vol.Optional('voice_snooze_minutes'): vol.All(vol.Coerce(float), vol.Range(min=0.01)),
     vol.Optional('voice_event_latch_secs'): vol.All(vol.Coerce(float), vol.Range(min=0.0)),
 })
 

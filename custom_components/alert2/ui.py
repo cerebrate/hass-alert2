@@ -138,7 +138,7 @@ def prepStrConfigField(fname, tval, doReport=True):
                     # non-prefixed version is used by prepStrConfig
                     'threshold.hysteresis', 'threshold.maximum', 'threshold.minimum', 'threshold.value',
                     'hysteresis', 'maximum', 'minimum', 'value',
-                    'delay_on_secs', 'voice_snooze_minutes', 'voice_event_latch_secs',
+                    'delay_on_secs', 'voice_event_latch_secs',
                     'generator_name', 'skip_internal_errors', 'notifier_startup_grace_secs' ]:
         # Should not need yaml parsing
         return tval
@@ -212,7 +212,7 @@ class RenderValueView(HomeAssistantView):
                 simple = True
             elif name in ['annotate_messages', 'reminder_frequency_mins', 'throttle_fires_per_mins',
                           'supersede_debounce_secs', 'icon', 'persistent_notifier_grouping',
-                          'voice_proxies_enabled', 'voice_snooze_minutes', 'voice_event_latch_secs']:
+                          'voice_proxies_enabled', 'voice_event_latch_secs']:
                 tval = DEFAULTS_SCHEMA({ name: ttxt })[name]
                 simple = True
             elif name in ['supersedes']:

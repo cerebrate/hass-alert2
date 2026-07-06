@@ -53,6 +53,13 @@ Implementation checklist for any new field that is editable from UI card flows:
 3. Update UI parser/validator paths in `ui.py` (`prepStrConfigField`, render/save/load handling).
 4. Add tests for YAML defaults, UI defaults, and per-alert override behavior.
 
+Voice proxy model (Alexa-first):
+- `voice_proxies_enabled` creates a single `switch.<alert>` proxy per alert.
+- That switch is ON when alert is firing and unacked.
+- Turning it OFF acks the alert; turning it ON only unacks if still firing.
+- `voice_event_latch_secs` controls event-alert active window; no voice snooze proxy exists in this model.
+- Backend/schema changes to these fields should be landed in `hass-alert2` before updating `hass-alert2-ui` form controls/text.
+
 ---
 
 ## Key Classes and Their Roles

@@ -45,7 +45,7 @@ from .config import (
 )
 from .entities import (
     AlertBase, EventAlert, ConditionAlert, AlertGenerator,
-    AlertVoiceActiveBinarySensor, AlertVoiceAckSwitch, AlertVoiceSnoozeSwitch,
+    AlertVoiceAlertSwitch,
     NotificationReason, mergeDataDict, getPreferredEntityId,
     notifierExists
 )
@@ -478,8 +478,7 @@ class Alert2Data:
         self.generators = {}
         self.component = EntityComponent[EventAlert](_LOGGER, DOMAIN, hass)
         self.sensorComponent = EntityComponent[AlertGenerator](_LOGGER, 'sensor', hass)
-        self.voiceBinarySensorComponent = EntityComponent[AlertVoiceActiveBinarySensor](_LOGGER, 'binary_sensor', hass)
-        self.voiceSwitchComponent = EntityComponent[AlertVoiceAckSwitch](_LOGGER, 'switch', hass)
+        self.voiceSwitchComponent = EntityComponent[AlertVoiceAlertSwitch](_LOGGER, 'switch', hass)
         self.voiceProxyMap = {}
         self.voiceProxyEntityIdMap = {}
         self._configEntryId = None
@@ -534,7 +533,6 @@ class Alert2Data:
                 'persistent_notifier_grouping': 'separate',
                 'reminder_message': None,
                 'voice_proxies_enabled': False,
-                'voice_snooze_minutes': 60.0,
                 'voice_event_latch_secs': 60.0,
             },
             # Optional defaults for internal alerts
@@ -976,37 +974,27 @@ class Alert2Data:
         key = (sourceAlert.alDomain, sourceAlert.alName)
         if key in self.voiceProxyMap:
             await self.removeVoiceProxies(sourceAlert.alDomain, sourceAlert.alName)
-        active_proxy = AlertVoiceActiveBinarySensor(sourceAlert)
-        ack_proxy = AlertVoiceAckSwitch(sourceAlert)
-        snooze_proxy = AlertVoiceSnoozeSwitch(sourceAlert)
-        self.voiceProxyMap[key] = [active_proxy, ack_proxy, snooze_proxy]
-        self.voiceProxyEntityIdMap[active_proxy.entity_id] = active_proxy
-        self.voiceProxyEntityIdMap[ack_proxy.entity_id] = ack_proxy
-        self.voiceProxyEntityIdMap[snooze_proxy.entity_id] = snooze_proxy
-        await self.voiceBinarySensorComponent.async_add_entities([active_proxy])
-        await self.voiceSwitchComponent.async_add_entities([ack_proxy, snooze_proxy])
+        alert_proxy = AlertVoiceAlertSwitch(sourceAlert)
+        self.voiceProxyMap[key] = alert_proxy
+        self.voiceProxyEntityIdMap[alert_proxy.entity_id] = alert_proxy
+        await self.voiceSwitchComponent.async_add_entities([alert_proxy])
         create_background_task(
             self._hass,
             DOMAIN,
-            self._assignVoiceProxyConfigEntryIds(
-                [active_proxy.entity_id, ack_proxy.entity_id, snooze_proxy.entity_id]
-            ),
+            self._assignVoiceProxyConfigEntryIds([alert_proxy.entity_id]),
         )
 
     async def removeVoiceProxies(self, domain, name, removeFromRegistry=False):
         key = (domain, name)
         if key not in self.voiceProxyMap:
             return
-        for ent in self.voiceProxyMap[key]:
-            if isinstance(ent, AlertVoiceActiveBinarySensor):
-                await self.voiceBinarySensorComponent.async_remove_entity(ent.entity_id)
-            else:
-                await self.voiceSwitchComponent.async_remove_entity(ent.entity_id)
-            self.voiceProxyEntityIdMap.pop(ent.entity_id, None)
-            if removeFromRegistry:
-                entRegistry = entity_registry.async_get(self._hass)
-                if entRegistry.async_is_registered(ent.entity_id):
-                    entRegistry.async_remove(ent.entity_id)
+        ent = self.voiceProxyMap[key]
+        await self.voiceSwitchComponent.async_remove_entity(ent.entity_id)
+        self.voiceProxyEntityIdMap.pop(ent.entity_id, None)
+        if removeFromRegistry:
+            entRegistry = entity_registry.async_get(self._hass)
+            if entRegistry.async_is_registered(ent.entity_id):
+                entRegistry.async_remove(ent.entity_id)
         del self.voiceProxyMap[key]
 
     def _getConfigEntryId(self):
@@ -1095,7 +1083,7 @@ class Alert2Data:
         # Then purge old voice proxies
         knownIds = set(self.voiceProxyEntityIdMap.keys())
         for anId, entry in list(entRegistry.entities.items()):
-            if entry.unique_id and entry.unique_id.startswith('voice-d='):
+            if entry.platform == DOMAIN and anId.startswith('switch.') and entry.unique_id and entry.unique_id.startswith('d='):
                 if anId not in knownIds:
                     _LOGGER.info(f'gcEntityRegistry: Removing unused registry entry for voice proxy {anId}')
                     entRegistry.async_remove(anId)
